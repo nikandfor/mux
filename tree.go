@@ -11,11 +11,12 @@ type (
 	node struct {
 		pref string
 
-		h      int32
-		branch bool
+		h HandlerFunc
 
 		len int
 		x   [pagesize]uint32 // link << 8 | char
+
+		branch bool
 	}
 )
 
@@ -25,7 +26,7 @@ var ErrRouting = errors.New("routing collision")
 
 var spaces = "                                                                                                                              "
 
-func (m *Mux) put(meth, path string, h int32) error {
+func (m *Mux) put(meth, path string, h HandlerFunc) error {
 	if m.meth == nil {
 		m.meth = make(map[string]uint32)
 	}
@@ -39,7 +40,7 @@ func (m *Mux) put(meth, path string, h int32) error {
 	return m.nodePut(path, 0, i, h)
 }
 
-func (m *Mux) nodePut(path string, st int, i uint32, h int32) error {
+func (m *Mux) nodePut(path string, st int, i uint32, h HandlerFunc) error {
 	n := &m.nodes[i]
 
 	/*
@@ -73,7 +74,7 @@ func (m *Mux) nodePut(path string, st int, i uint32, h int32) error {
 		moved.x = n.x
 
 		n.pref = n.pref[:c]
-		n.h = -1
+		n.h = nil
 
 		n.x = [pagesize]uint32{}
 
@@ -86,7 +87,7 @@ func (m *Mux) nodePut(path string, st int, i uint32, h int32) error {
 	st += c
 
 	if st == len(path) {
-		if n.h >= 0 {
+		if n.h != nil {
 			return ErrRouting
 		}
 
@@ -106,7 +107,7 @@ func (m *Mux) nodePut(path string, st int, i uint32, h int32) error {
 	}
 
 	if n.len < pagesize {
-		m.insert(path, st, i, h, j)
+		m.insert(path, st, i, j, h)
 		return nil
 	}
 
@@ -142,12 +143,12 @@ func (m *Mux) nodePut(path string, st int, i uint32, h int32) error {
 		j -= mid
 	}
 
-	m.insert(path, st, sub, h, j)
+	m.insert(path, st, sub, j, h)
 
 	return nil
 }
 
-func (m *Mux) insert(path string, st int, i uint32, h int32, j int) {
+func (m *Mux) insert(path string, st int, i uint32, j int, h HandlerFunc) {
 	ch := m.new(path[st:])
 	m.nodes[ch].h = h
 
@@ -158,16 +159,16 @@ func (m *Mux) insert(path string, st int, i uint32, h int32, j int) {
 	n.x[j] = uint32(ch<<8) | uint32(path[st])
 }
 
-func (m *Mux) get(meth, path string) (h int32) {
+func (m *Mux) get(meth, path string) (h HandlerFunc) {
 	i, ok := m.meth[meth]
 	if !ok {
-		return -1
+		return nil
 	}
 
 	return m.nodeGet(path, 0, i)
 }
 
-func (m *Mux) nodeGet(path string, st int, i uint32) int32 {
+func (m *Mux) nodeGet(path string, st int, i uint32) HandlerFunc {
 	n := &m.nodes[i]
 
 	var j int
@@ -178,7 +179,7 @@ func (m *Mux) nodeGet(path string, st int, i uint32) int32 {
 	c := common(n.pref, path[st:])
 
 	if c != len(n.pref) {
-		return -1
+		return nil
 	}
 
 	st += c
@@ -188,7 +189,7 @@ func (m *Mux) nodeGet(path string, st int, i uint32) int32 {
 	}
 
 	if n.len == 0 {
-		return -1
+		return nil
 	}
 
 	j = search(n, path[st])
@@ -205,7 +206,6 @@ func (m *Mux) new(pref string) (i uint32) {
 	//	fmt.Printf("++ new  %3x  pref %-24q  from %v\n", i, pref, loc.Callers(1, 2))
 	m.nodes = append(m.nodes, node{
 		pref: pref,
-		h:    -1,
 	})
 	return i
 }
@@ -236,7 +236,7 @@ func (m *Mux) dump(w io.Writer, i uint32, c byte, d int) {
 		x = 'X'
 	}
 
-	fmt.Fprintf(w, "%vnode%v %4x  pref %-24q  func %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, n.pref, n.h, x, n.len, ll(n.x, n.len))
+	fmt.Fprintf(w, "%vnode%v %4x  pref %-24q  func %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, n.pref, fn(n.h), x, n.len, ll(n.x, n.len))
 	for j := 0; j < n.len; j++ {
 		m.dump(w, n.x[j]>>8, byte(n.x[j]), d+1)
 	}

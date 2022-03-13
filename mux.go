@@ -7,7 +7,6 @@ type (
 		meth map[string]uint32
 
 		nodes []node
-		funcs []HandlerFunc
 	}
 
 	HandlerFunc func(c *Context) error
@@ -18,12 +17,7 @@ func New() *Mux {
 }
 
 func (m *Mux) FindHandler(meth, path string) HandlerFunc {
-	h := m.get(meth, path)
-	if h < 0 {
-		return nil
-	}
-
-	return m.funcs[h]
+	return m.get(meth, path)
 }
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -44,10 +38,7 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (m *Mux) Handle(meth, path string, h HandlerFunc) {
-	hid := int32(len(m.funcs))
-	m.funcs = append(m.funcs, h)
-
-	err := m.put(meth, path, hid)
+	err := m.put(meth, path, h)
 	if err != nil {
 		panic(err)
 	}

@@ -101,7 +101,9 @@ func BenchmarkMuxStatic(b *testing.B) {
 	b.ResetTimer()
 
 	resp := httptest.NewRecorder()
-	req := http.Request{}
+	req := http.Request{
+		Method: "GET",
+	}
 
 	n := b.N / len(staticRoutes)
 	if n == 0 {
@@ -124,7 +126,7 @@ func BenchmarkMuxStaticWrite(b *testing.B) {
 	var m Mux
 
 	h := func(c *Context) error {
-		_, _ = io.WriteString(c, c.Request.RequestURI)
+		_, _ = io.WriteString(c.ResponseWriter.(*httptest.ResponseRecorder).Body, c.Request.RequestURI)
 		return nil
 	}
 
@@ -135,7 +137,9 @@ func BenchmarkMuxStaticWrite(b *testing.B) {
 	b.ResetTimer()
 
 	resp := httptest.NewRecorder()
-	req := http.Request{}
+	req := http.Request{
+		Method: "GET",
+	}
 
 	n := b.N / len(staticRoutes)
 	if n == 0 {
@@ -151,4 +155,6 @@ func BenchmarkMuxStaticWrite(b *testing.B) {
 			m.ServeHTTP(resp, &req)
 		}
 	}
+
+	assert.Equal(b, resp.Body.String(), staticRoutes[len(staticRoutes)-1].path)
 }

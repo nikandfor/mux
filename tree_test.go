@@ -2,6 +2,7 @@ package mux
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/nikandfor/assert"
 )
@@ -9,21 +10,24 @@ import (
 func TestTree(t *testing.T) {
 	var m Mux
 
-	err := m.put("GET", "/dog", 1)
+	f1 := func(*Context) error { return nil }
+	f2 := func(*Context) error { return nil }
+
+	err := m.put("GET", "/dog", f1)
 	assert.NoError(t, err)
 
 	t.Logf("dump %v  (%d nodes)\n%s", m.meth, len(m.nodes), m.dumpString(m.meth["GET"]))
 
-	assert.Equal(t, int32(1), m.get("GET", "/dog"), "/dog")
+	assert.Equal(t, fn(f1), fn(m.get("GET", "/dog")), "/dog")
 
-	err = m.put("GET", "/dolly", 2)
+	err = m.put("GET", "/dolly", f2)
 	assert.NoError(t, err)
 
 	t.Logf("dump %v  (%d nodes)\n%s", m.meth, len(m.nodes), m.dumpString(m.meth["GET"]))
 
-	assert.Equal(t, int32(1), m.get("GET", "/dog"), "/dog")
-	assert.Equal(t, int32(2), m.get("GET", "/dolly"), "/dolly")
-	assert.Equal(t, int32(-1), m.get("GET", "/dolly1"), "/dolly1")
+	assert.Equal(t, fn(f1), fn(m.get("GET", "/dog")), "/dog")
+	assert.Equal(t, fn(f2), fn(m.get("GET", "/dolly")), "/dolly")
+	assert.Equal(t, fn(nil), fn(m.get("GET", "/dolly1")), "/dolly1")
 }
 
 func TestSearch(t *testing.T) {
@@ -41,4 +45,42 @@ func TestSearch(t *testing.T) {
 	assert.Equal(t, 2, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '6'))
 	assert.Equal(t, 2, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '7'))
 	assert.Equal(t, 3, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '8'))
+}
+
+func BenchmarkTreeStatic(b *testing.B) {
+	b.ReportAllocs()
+
+	var m Mux
+
+	h := func(c *Context) error {
+		//	_, err := io.WriteString(c, c.Request.RequestURI)
+		return nil
+	}
+
+	for _, tc := range staticRoutes {
+		m.Handle(tc.method, tc.path, h)
+	}
+
+	b.ResetTimer()
+
+	n := b.N / len(staticRoutes)
+	if n == 0 {
+		n = 1
+	}
+
+	root := m.meth["GET"]
+
+	for i := 0; i < n; i++ {
+		for _, tc := range staticRoutes {
+			m.nodeGet(tc.path, 0, root)
+		}
+	}
+}
+
+func fn(f func(*Context) error) uintptr {
+	if f == nil {
+		return 0
+	}
+
+	return **(**uintptr)(unsafe.Pointer(&f))
 }
