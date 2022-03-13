@@ -26,78 +26,54 @@ type (
 	}
 )
 
-func (m *Mux) putHandler(path string, st int, p *page, h HandlerFunc) {
-	p = m.put(path, st, p)
-	if p.h != nil {
-		panic("already set")
-	}
-
-	p.h = h
-
-	//	if m.root == nil {
-	//		m.root = p
-	//	}
-}
-
-func (m *Mux) getHandler(path string, st int, p *page) HandlerFunc {
-	if p == nil {
-		return nil
-	}
-
-	p = m.get(path, p)
-	if p == nil {
-		return nil
-	}
-
-	return p.h
-}
-
-func (m *Mux) get(path string, p *page) *page {
+func (m *Mux) get(meth, path string, c *Context) (h HandlerFunc) {
+	p := m.meth[meth]
 	if p == nil {
 		return nil
 	}
 
 loop:
 	for {
-		c := common(p.pref, path)
-
-		if c != len(p.pref) {
+		i := common(p.pref, path)
+		if i != len(p.pref) {
 			return nil
 		}
 
-		if c == len(path) {
-			return p
+		if i == len(path) {
+			return p.h
 		}
 
-		for j, k := range p.k {
-			if k == path[c] {
+		_ = path[i]
+
+		for j := 0; j < len(p.k); j++ {
+			if p.k[j] == path[i] {
 				p = p.s[j]
-				path = path[c:]
+				path = path[i:]
 				continue loop
 			}
 		}
 
 		return nil
-
-		//	j := p.k[path[c]-0x20]
-		//	if j == -1 {
-		//		return nil
-		//	}
-
-		//	p = p.s[j]
-		//	path = path[c:]
-
-		//	st = c
 	}
 }
 
-func (m *Mux) put(path string, st int, p *page) (sub *page) {
+func (m *Mux) put(meth, path string, h HandlerFunc) (sub *page) {
+	if m.meth == nil {
+		m.meth = make(map[string]*page, 16)
+	}
+
+	p := m.meth[meth]
 	if p == nil {
-		return m.new(path[st:])
+		p = m.new(path)
+		p.h = h
+
+		m.meth[meth] = p
+
+		return
 	}
 
 	for {
-		c := common(p.pref, path[st:])
+		c := common(p.pref, path)
 
 		if c != len(p.pref) {
 			sub = m.new(p.pref[c:])
@@ -113,21 +89,30 @@ func (m *Mux) put(path string, st int, p *page) (sub *page) {
 			p.setsub(sub.pref[0], sub)
 		}
 
-		c += st
-
 		if c == len(path) {
+			if p.h != nil {
+				panic(path)
+			}
+
+			p.h = h
+
 			return p
 		}
 
 		sub = p.sub(path[c])
 		if sub != nil {
-			st = c
+			defer func(p *page) {
+				sort.Sort(bysize{p})
+			}(p)
+
+			path = path[c:]
 			p = sub
 
 			continue
 		}
 
 		sub = m.new(path[c:])
+		sub.h = h
 
 		p.setsub(sub.pref[0], sub)
 
@@ -141,7 +126,7 @@ func common(a, b string) (c int) {
 		m = len(b)
 	}
 
-	_ = a[m-1] == b[m-1]
+	_, _ = a[:m], b[:m]
 
 	for c < m && a[c] == b[c] {
 		c++

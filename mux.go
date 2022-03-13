@@ -45,34 +45,9 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (m *Mux) handle(meth, path string, h HandlerFunc) {
-	if m.meth == nil {
-		m.meth = make(map[string]*page)
-	}
-
-	root, ok := m.meth[meth]
-
-	page := m.put(path, 0, root)
-	if !ok {
-		m.meth[meth] = page
-	}
-
-	if page.h != nil {
-		panic("routing collision")
-	}
-
-	page.h = h
+	m.put(meth, path, h)
 }
 
 func (m *Mux) match(meth, path string, c *Context) HandlerFunc {
-	root, ok := m.meth[meth]
-	if !ok {
-		return nil
-	}
-
-	page := m.get(path, root)
-	if page == nil {
-		return nil
-	}
-
-	return page.h
+	return m.get(meth, path, c)
 }
