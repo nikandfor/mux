@@ -42,6 +42,6 @@ func TestMux(t *testing.T) {
 		assert.True(t, ok2)
 	}
 
-	t.Logf("dump:\n%s", m.dumpString(0))
-	t.Logf("dump GET:\n%s", m.dumpString(m.getVal("GET", 0)))
+	//	t.Logf("dump:\n%s", m.dumpString(m.root))
+	t.Logf("dump GET:\n%s", m.dumpString(m.meth["GET"]))
 }

@@ -7,62 +7,75 @@ import (
 	"github.com/nikandfor/assert"
 )
 
-func TestSearch(t *testing.T) {
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{}, len: 0}, '1'))
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'5'}, len: 1}, '5'))
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'6'}, len: 1}, '5'))
-	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4'}, len: 1}, '5'))
-	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4', '5'}, len: 2}, '5'))
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'5', '6'}, len: 2}, '5'))
-	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4', '5', '6'}, len: 3}, '5'))
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '2'))
-	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '3'))
-	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '4'))
-	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '5'))
-	assert.Equal(t, int8(2), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '6'))
-	assert.Equal(t, int8(2), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '7'))
-	assert.Equal(t, int8(3), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '8'))
-}
-
 func TestTree(t *testing.T) {
+	var res string
+	h := func(p string) HandlerFunc {
+		return func(c *Context) error {
+			res = p
+			return nil
+		}
+	}
+
 	var m Mux
 
-	_ = m.putVal("/dog", 0, 1)
+	m.handle("GET", "/dog", h("/dog"))
 
-	fmt.Printf("dump (%d nodes)\n%s\n", len(m.p), m.dumpString(0))
+	fmt.Printf("dump\n%s\n", m.dumpString(m.meth["GET"]))
 
-	assert.Equal(t, int32(1), m.getVal("/dog", 0), "/dog")
+	//	assert.Equal(t, m.root, m.get("/dog", 0, m.root), "/dog")
+	hh := m.getHandler("/dog", 0, m.meth["GET"])
+	if assert.True(t, hh != nil && hh(nil) == nil) {
+		assert.Equal(t, "/dog", res)
+	}
 
 	fmt.Printf("===\n")
 
-	_ = m.putVal("/dolly", 0, 2)
+	m.handle("GET", "/dolly", h("/dolly"))
 
-	fmt.Printf("dump (%d nodes)\n%s\n", len(m.p), m.dumpString(0))
+	fmt.Printf("dump\n%s\n", m.dumpString(m.meth["GET"]))
 
-	assert.Equal(t, int32(1), m.getVal("/dog", 0), "/dog")
-	assert.Equal(t, int32(2), m.getVal("/dolly", 0), "/dolly")
-	assert.Equal(t, none, m.getVal("/dolly1", 0), "/dolly1")
+	hh = m.getHandler("/dog", 0, m.meth["GET"])
+	if assert.True(t, hh != nil && hh(nil) == nil) {
+		assert.Equal(t, "/dog", res)
+	}
+
+	hh = m.getHandler("/dolly", 0, m.meth["GET"])
+	if assert.True(t, hh != nil && hh(nil) == nil) {
+		assert.Equal(t, "/dolly", res)
+	}
+
+	hh = m.getHandler("/dolly1", 0, m.meth["GET"])
+	assert.True(t, hh == nil)
 }
 
 func TestTreeStatic(t *testing.T) {
 	var m Mux
 
+	var res string
+	h := func(p string) HandlerFunc {
+		return func(c *Context) error {
+			res = p
+			return nil
+		}
+	}
+
 	for i, tc := range staticRoutes {
 		//	fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
 
-		m.putVal(tc.path, 0, int32(i))
+		m.handle("GET", tc.path, h(tc.path))
 
-		for j, tc := range staticRoutes[:i+1] {
-			ii := m.getVal(tc.path, 0)
-
-			assert.Equal(t, int32(j), ii, tc.path)
+		for _, tc := range staticRoutes[:i+1] {
+			h := m.getHandler(tc.path, 0, m.meth["GET"])
+			if assert.True(t, h != nil && h(nil) == nil, tc.path) {
+				assert.Equal(t, tc.path, res)
+			}
 
 			if t.Failed() {
 				break
 			}
 		}
 
-		//	fmt.Printf("routes dump\n%s\n", m.dumpString(0))
+		//	fmt.Printf("routes dump\n%s\n", m.dumpString(m.root))
 
 		if t.Failed() {
 			break
@@ -70,66 +83,45 @@ func TestTreeStatic(t *testing.T) {
 	}
 
 	//if t.Failed() {
-	t.Logf("routes dump (%d pages)\n%s", len(m.p), m.dumpString(0))
+	t.Logf("routes dump\n%s", m.dumpString(m.meth["GET"]))
 	//}
-}
-
-func BenchmarkSearch(b *testing.B) {
-	b.ReportAllocs()
-
-	p := page{
-		x:   [pagesize]int32{'a', 'b', 'c', 'd'},
-		len: pagesize,
-	}
-
-	var j int8
-	for i := 0; i < b.N; i++ {
-		j = search(&p, 'b')
-	}
-
-	assert.Equal(b, int8(1), j)
-}
-
-func BenchmarkSearch2(b *testing.B) {
-	b.ReportAllocs()
-
-	m := Mux{
-		p: []page{{
-			x:   [pagesize]int32{'a', 'b', 'c', 'd'},
-			len: pagesize,
-		}},
-	}
-
-	var j int8
-	for i := 0; i < b.N; i++ {
-		j = m.search(0, 'b')
-	}
-
-	assert.Equal(b, int8(1), j)
 }
 
 func BenchmarkTreeStatic(b *testing.B) {
 	b.ReportAllocs()
 
+	var res string
+	h := func(p string) HandlerFunc {
+		return func(c *Context) error {
+			res = p
+			return nil
+		}
+	}
+
 	var m Mux
 
-	for i, tc := range staticRoutes {
-		m.putVal(tc.path, 0, int32(i))
+	for _, tc := range staticRoutes {
+		m.handle("GET", tc.path, h(tc.path))
+	}
+
+	l := len(staticRoutes) - 1
+	hh := m.getHandler(staticRoutes[l].path, 0, m.meth["GET"])
+	if assert.True(b, hh != nil && hh(nil) == nil) {
+		assert.Equal(b, staticRoutes[l].path, res)
 	}
 
 	b.ResetTimer()
+
+	root := m.meth["GET"]
 
 	n := b.N / len(staticRoutes)
 	if n == 0 {
 		n = 1
 	}
 
-	var val int32
 	for i := 0; i < n; i++ {
 		for _, tc := range staticRoutes {
-			val = m.getVal(tc.path, 0)
+			m.getHandler(tc.path, 0, root)
 		}
 	}
-
-	assert.Equal(b, int32(len(staticRoutes)-1), val)
 }

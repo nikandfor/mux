@@ -1,43 +1,76 @@
 package mux
 
+import (
+	"net/http"
+	pathpkg "path"
+)
+
 type (
 	Mux struct {
-		p []page
-		f []HandlerFunc
+		//	root *page
+		meth map[string]*page
 	}
 
 	HandlerFunc func(c *Context) error
 )
 
+func New() *Mux {
+	return &Mux{}
+}
+
+func (m *Mux) Handle(meth, path string, h HandlerFunc) {
+	path = pathpkg.Clean(path)
+
+	m.handle(meth, path, h)
+}
+
+func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c := getContext()
+	defer putContext(c)
+
+	c.Context = req.Context()
+	c.ResponseWriter = w
+	c.Request = req
+
+	h := m.match(req.Method, req.RequestURI, c)
+	if h == nil {
+		// TODO: 404
+		return
+	}
+
+	err := h(c)
+	_ = err
+}
+
 func (m *Mux) handle(meth, path string, h HandlerFunc) {
-	mp := m.put(meth, 0, 0)
-
-	if m.p[mp].val == none {
-		ch := m.new()
-		m.p[mp].val = ch
-
-		m.p[ch].pref = path
+	if m.meth == nil {
+		m.meth = make(map[string]*page)
 	}
 
-	page := m.put(path, 0, m.p[mp].val)
-	if m.p[page].val != -1 {
-		panic("handlers collision")
+	root, ok := m.meth[meth]
+
+	page := m.put(path, 0, root)
+	if !ok {
+		m.meth[meth] = page
 	}
 
-	m.p[page].val = int32(len(m.f))
-	m.f = append(m.f, h)
+	if page.h != nil {
+		panic("routing collision")
+	}
+
+	page.h = h
 }
 
 func (m *Mux) match(meth, path string, c *Context) HandlerFunc {
-	mroot := m.get(meth, 0, 0)
-	if mroot == none || m.p[mroot].val == none {
+	root, ok := m.meth[meth]
+	if !ok {
 		return nil
 	}
 
-	page := m.put(path, 0, m.p[mroot].val)
-	if page == none || m.p[page].val == none {
+	page := m.get(path, 0, root)
+	if page == nil {
 		return nil
 	}
 
-	return m.f[m.p[page].val]
+	return page.h
 }
