@@ -2,253 +2,205 @@ package mux
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 )
 
+const (
+	pagesize = 4
+
+	none int32 = -1
+)
+
+var spaces = "                                                                                                                              "
+
 type (
-	node struct {
+	page struct {
 		pref string
 
-		h HandlerFunc
+		x [pagesize]int32
 
-		len int
-		x   [pagesize]uint32 // link << 8 | char
+		val int32
 
+		len    int8
 		branch bool
 	}
 )
 
-const pagesize = 4
-
-var ErrRouting = errors.New("routing collision")
-
-var spaces = "                                                                                                                              "
-
-func (m *Mux) put(meth, path string, h HandlerFunc) error {
-	if m.meth == nil {
-		m.meth = make(map[string]uint32)
+func (m *Mux) getVal(path string, root int32) int32 {
+	if int(root) == len(m.p) {
+		return none
 	}
 
-	i, ok := m.meth[meth]
-	if !ok {
-		i = m.new(path)
-		m.meth[meth] = i
+	p := m.get(path, 0, root)
+	if p == none {
+		return none
 	}
 
-	return m.nodePut(path, 0, i, h)
+	return m.p[p].val
 }
 
-func (m *Mux) nodePut(path string, st int, i uint32, h HandlerFunc) error {
-	n := &m.nodes[i]
+func (m *Mux) putVal(path string, root, val int32) int32 {
+	if int(root) == len(m.p) {
+		m.p = append(m.p, page{
+			pref: path,
+			val:  val,
+		})
 
-	/*
-		x := '_'
-		if n.branch {
-			x = 'X'
-		}
-
-		defer func(st int) {
-			if n.branch {
-				x = 'X'
-			}
-
-			fmt.Printf("<< node %3x  put  %-24q  into %-10q  h%3x %c len %d  %v  from %v\n", i, path[st:], n.pref, n.h, x, n.len, ll(n.x, n.len), loc.Callers(1, 2))
-		}(st)
-
-		fmt.Printf(">> node %3x  put  %-24q  into %-10q  h%3x %c len %d  %v  from %v\n", i, path[st:], n.pref, n.h, x, n.len, ll(n.x, n.len), loc.Callers(1, 2))
-	*/
-
-	c := common(n.pref, path[st:])
-
-	if c != len(n.pref) { // split trie
-		// allocate new
-		j := m.new(n.pref[c:])
-		n = &m.nodes[i] // renew pointer since underlaying array may change while new
-		moved := &m.nodes[j]
-
-		// move current (to not change link to i'th node)
-		moved.h = n.h
-		moved.len = n.len
-		moved.x = n.x
-
-		n.pref = n.pref[:c]
-		n.h = nil
-
-		n.x = [pagesize]uint32{}
-
-		n.len = 1
-		n.x[0] = j<<8 | uint32(moved.pref[0])
-
-		//	fmt.Printf("== node %x  put  %-10q  into %-10q  h%3x len %d  %v  from %v\n", i, path[st:], n.pref, n.h, n.len, ll(n.x, n.len), loc.Callers(1, 2))
+		return root
 	}
 
-	st += c
-
-	if st == len(path) {
-		if n.h != nil {
-			return ErrRouting
-		}
-
-		n.h = h
-
-		return nil
-	}
-
-	j := search(n, path[st])
-
-	if n.branch || j < n.len && path[st] == byte(n.x[j]) {
-		if j == n.len || path[st] < byte(n.x[j]) && j != 0 {
-			j--
-		}
-
-		return m.nodePut(path, st, n.x[j]>>8, h)
-	}
-
-	if n.len < pagesize {
-		m.insert(path, st, i, j, h)
-		return nil
-	}
-
-	// split page
-
-	li := m.new("")
-	ri := m.new("")
-
-	l := &m.nodes[li]
-	r := &m.nodes[ri]
-	n = &m.nodes[i] // retake pointer after append
-
-	mid := n.len / 2
-
-	copy(l.x[:], n.x[:mid])
-	copy(r.x[:n.len-mid], n.x[mid:])
-	l.len = mid
-	r.len = n.len - mid
-	l.branch = n.branch
-	r.branch = n.branch
-
-	n.x[0] = uint32(li<<8) | l.x[0]&0xff
-	n.x[1] = uint32(ri<<8) | r.x[0]&0xff
-	n.len = 2
-
-	n.branch = true
-
-	var sub uint32
-	if j <= mid {
-		sub = li
-	} else {
-		sub = ri
-		j -= mid
-	}
-
-	m.insert(path, st, sub, j, h)
-
-	return nil
+	p := m.put(path, 0, root)
+	m.p[p].val = val
+	return p
 }
 
-func (m *Mux) insert(path string, st int, i uint32, j int, h HandlerFunc) {
-	ch := m.new(path[st:])
-	m.nodes[ch].h = h
+func (m *Mux) get(path string, st int, root int32) (i int32) {
+	i = root
 
-	n := &m.nodes[i]
-
-	copy(n.x[j+1:], n.x[j:n.len])
-	n.len++
-	n.x[j] = uint32(ch<<8) | uint32(path[st])
-}
-
-func (m *Mux) get(meth, path string) (h HandlerFunc) {
-	i, ok := m.meth[meth]
-	if !ok {
-		return nil
-	}
-
-	return m.nodeGet(path, 0, i)
-}
-
-func (m *Mux) nodeGet(path string, st int, i uint32) HandlerFunc {
-	n := &m.nodes[i]
-
-	var j int
+	//	fmt.Printf(">> get  path %v%-*q  page%4x  ***\n", spaces[:st], 24-st, path[st:], i)
 	//	defer func() {
-	//		fmt.Printf(">> node %3x  get  %-24q  j %x  %v\n", i, path[st:], j, ll(n.x, n.len))
+	//		fmt.Printf("<< get  path %v%-*q  page%4x  *** from %v\n", spaces[:st], 24-st, path[st:], i, loc.Callers(1, 2))
 	//	}()
 
-	c := common(n.pref, path[st:])
+	for {
+		c := common(m.p[i].pref, path[st:])
 
-	if c != len(n.pref) {
-		return nil
+		//		fmt.Printf("   get  path %v%-*q  page%4x  cp%2x\n", spaces[:st], 24-st, path[st:], i, c)
+
+		if c != len(m.p[i].pref) {
+			return none
+		}
+
+		c += st
+
+		if c == len(path) {
+			return i
+		}
+
+		j := search(&m.p[i], path[c])
+
+		//		fmt.Printf("   get  path %v%-*q  page%4x  j %2x of %v  char %c\n", spaces[:st], 24-st, path[st:], i, j, m.ll(i), path[c])
+
+		if m.p[i].branch || j < m.p[i].len && path[c] == byte(m.p[i].x[j]) {
+			if m.p[i].branch && (j == m.p[i].len || path[c] < byte(m.p[i].x[j]) && j != 0) {
+				j--
+			}
+
+			i = m.p[i].x[j] >> 8
+			st = c
+
+			continue
+		}
+
+		return none
 	}
-
-	st += c
-
-	if st == len(path) {
-		return n.h
-	}
-
-	if n.len == 0 {
-		return nil
-	}
-
-	j = search(n, path[st])
-
-	if j == n.len || path[st] < byte(n.x[j]) && j != 0 {
-		j--
-	}
-
-	return m.nodeGet(path, st, n.x[j]>>8)
 }
 
-func (m *Mux) new(pref string) (i uint32) {
-	i = uint32(len(m.nodes))
-	//	fmt.Printf("++ new  %3x  pref %-24q  from %v\n", i, pref, loc.Callers(1, 2))
-	m.nodes = append(m.nodes, node{
-		pref: pref,
-	})
+func (m *Mux) put(path string, st int, root int32) (i int32) {
+	i = root
+
+	for {
+		c := common(m.p[i].pref, path[st:])
+
+		if c != len(m.p[i].pref) {
+			m.splitTrie(i, c)
+		}
+
+		c += st
+
+		if c == len(path) {
+			return i
+		}
+
+		j := search(&m.p[i], path[c])
+
+		//		fmt.Printf("   put  path %v%-24q  page%4x  j %2x of %v  char %c\n", spaces[:st], path[st:], i, j, m.ll(i), path[c])
+
+		if m.p[i].branch || j < m.p[i].len && path[c] == byte(m.p[i].x[j]) {
+			if m.p[i].branch && (j == m.p[i].len || path[c] < byte(m.p[i].x[j]) && j != 0) {
+				j--
+			}
+
+			i = m.p[i].x[j] >> 8
+			st = c
+
+			continue
+		}
+
+		if m.p[i].len < pagesize {
+			return m.insert(i, path[c:], j)
+		}
+
+		i, j = m.splitPage(i, j)
+
+		return m.insert(i, path[c:], j)
+	}
+}
+
+func (m *Mux) splitPage(i int32, j int8) (int32, int8) {
+	l := m.new()
+	r := m.new()
+
+	mid := m.p[i].len / 2
+
+	copy(m.p[l].x[:], m.p[i].x[:mid])
+	copy(m.p[r].x[:], m.p[i].x[mid:])
+	m.p[l].len = mid
+	m.p[r].len = m.p[i].len - mid
+
+	m.p[l].branch = m.p[i].branch
+	m.p[r].branch = m.p[i].branch
+
+	m.p[i].x[0] = l<<8 | m.p[l].x[0]&0xff
+	m.p[i].x[1] = r<<8 | m.p[r].x[0]&0xff
+	m.p[i].len = 2
+
+	m.p[i].branch = true
+
+	if j <= mid {
+		return l, j
+	} else {
+		return r, j - mid
+	}
+}
+
+func (m *Mux) splitTrie(i int32, c int) {
+	ch := m.new()
+
+	m.p[ch] = m.p[i]
+	m.p[ch].pref = m.p[i].pref[c:]
+
+	m.p[i].pref = m.p[i].pref[:c]
+	m.p[i].x[0] = ch<<8 | int32(m.p[ch].pref[0])
+	m.p[i].len = 1
+	m.p[i].branch = false
+}
+
+func (m *Mux) insert(i int32, path string, j int8) (ch int32) {
+	ch = m.new()
+	m.p[ch].pref = path
+
+	copy(m.p[i].x[j+1:], m.p[i].x[j:])
+	m.p[i].x[j] = ch<<8 | int32(path[0])
+	m.p[i].len++
+
+	return ch
+}
+
+func (m *Mux) new() (i int32) {
+	i = int32(len(m.p))
+	m.p = append(m.p, page{})
 	return i
 }
 
-func (m *Mux) dumpString(i uint32) string {
-	var b bytes.Buffer
-
-	m.dump(&b, i, 0, 0)
-
-	//	fmt.Fprintf(&b, "======\n")
-
-	//	for i, n := range m.nodes {
-	//		fmt.Fprintf(&b, "node %4x  pref %-24q  func %3x  childs %d  %v\n", i, n.pref, n.h, n.len, ll(n.x, n.len))
-	//	}
-
-	return b.String()
-}
-
-func (m *Mux) dump(w io.Writer, i uint32, c byte, d int) {
-	if d > 8 {
-		return
-	}
-
-	n := &m.nodes[i]
-
-	x := '_'
-	if n.branch {
-		x = 'X'
-	}
-
-	fmt.Fprintf(w, "%vnode%v %4x  pref %-24q  func %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, n.pref, fn(n.h), x, n.len, ll(n.x, n.len))
-	for j := 0; j < n.len; j++ {
-		m.dump(w, n.x[j]>>8, byte(n.x[j]), d+1)
-	}
-}
-
-func search(n *node, q byte) (j int) {
-	l, r := 0, n.len
+func search(p *page, q byte) (j int8) {
+	l, r := int8(0), p.len
 
 	for l < r {
-		j = int(uint(l+r) >> 1)
+		j = l + (r-l)>>1
 
-		if q <= byte(n.x[j]) {
+		if q <= byte(p.x[j]) {
 			r = j
 		} else {
 			l = j + 1
@@ -271,13 +223,50 @@ func common(a, b string) (c int) {
 	return c
 }
 
-func ll(x [pagesize]uint32, l int) string {
+func (m *Mux) dumpString(i int32) string {
+	var b bytes.Buffer
+
+	m.dump(&b, i, 0, 0)
+
+	//	fmt.Fprintf(&b, "======\n")
+
+	//	for i, n := range m.p {
+	//	}
+
+	return b.String()
+}
+
+func (m *Mux) dump(w io.Writer, i int32, d, st int) {
+	const maxdepth = 10
+	if d > maxdepth {
+		fmt.Fprintf(w, "%v...\n", spaces[:2*d])
+		return
+	}
+
+	x := '_'
+	if m.p[i].branch {
+		x = 'X'
+	}
+
+	valPad := 12 - st
+	if valPad < 0 {
+		valPad = 0
+	}
+
+	fmt.Fprintf(w, "   dump %v%d%v  page%4x  pref %v%-24q  %vval%4x  %c  %v\n", spaces[:2*d], d, spaces[:2*(maxdepth-d)], i, spaces[:st], m.p[i].pref, spaces[:valPad], m.p[i].val, x, m.ll(i))
+	//	fmt.Fprintf(w, "%vpage%v %4x  pref %-24q  val %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, m.p[i].pref, m.p[i].val, x, m.p[i].len, m.ll(i))
+	for j := int8(0); j < m.p[i].len; j++ {
+		m.dump(w, m.p[i].x[j]>>8, d+1, st+len(m.p[i].pref))
+	}
+}
+
+func (m *Mux) ll(i int32) string {
 	var b bytes.Buffer
 
 	b.WriteByte('[')
 
-	for i := range x[:l] {
-		fmt.Fprintf(&b, " %q:%x", byte(x[i]), x[i]>>8)
+	for j := range m.p[i].x[:m.p[i].len] {
+		fmt.Fprintf(&b, " %q:%x", byte(m.p[i].x[j]), m.p[i].x[j]>>8)
 	}
 
 	b.WriteByte(']')

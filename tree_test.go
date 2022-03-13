@@ -1,50 +1,77 @@
 package mux
 
 import (
+	"fmt"
 	"testing"
-	"unsafe"
 
 	"github.com/nikandfor/assert"
 )
 
+func TestSearch(t *testing.T) {
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{}, len: 0}, '1'))
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'5'}, len: 1}, '5'))
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'6'}, len: 1}, '5'))
+	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4'}, len: 1}, '5'))
+	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4', '5'}, len: 2}, '5'))
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'5', '6'}, len: 2}, '5'))
+	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'4', '5', '6'}, len: 3}, '5'))
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '2'))
+	assert.Equal(t, int8(0), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '3'))
+	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '4'))
+	assert.Equal(t, int8(1), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '5'))
+	assert.Equal(t, int8(2), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '6'))
+	assert.Equal(t, int8(2), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '7'))
+	assert.Equal(t, int8(3), search(&page{x: [pagesize]int32{'3', '5', '7'}, len: 3}, '8'))
+}
+
 func TestTree(t *testing.T) {
 	var m Mux
 
-	f1 := func(*Context) error { return nil }
-	f2 := func(*Context) error { return nil }
+	_ = m.putVal("/dog", 0, 1)
 
-	err := m.put("GET", "/dog", f1)
-	assert.NoError(t, err)
+	fmt.Printf("dump (%d nodes)\n%s\n", len(m.p), m.dumpString(0))
 
-	t.Logf("dump %v  (%d nodes)\n%s", m.meth, len(m.nodes), m.dumpString(m.meth["GET"]))
+	assert.Equal(t, int32(1), m.getVal("/dog", 0), "/dog")
 
-	assert.Equal(t, fn(f1), fn(m.get("GET", "/dog")), "/dog")
+	fmt.Printf("===\n")
 
-	err = m.put("GET", "/dolly", f2)
-	assert.NoError(t, err)
+	_ = m.putVal("/dolly", 0, 2)
 
-	t.Logf("dump %v  (%d nodes)\n%s", m.meth, len(m.nodes), m.dumpString(m.meth["GET"]))
+	fmt.Printf("dump (%d nodes)\n%s\n", len(m.p), m.dumpString(0))
 
-	assert.Equal(t, fn(f1), fn(m.get("GET", "/dog")), "/dog")
-	assert.Equal(t, fn(f2), fn(m.get("GET", "/dolly")), "/dolly")
-	assert.Equal(t, fn(nil), fn(m.get("GET", "/dolly1")), "/dolly1")
+	assert.Equal(t, int32(1), m.getVal("/dog", 0), "/dog")
+	assert.Equal(t, int32(2), m.getVal("/dolly", 0), "/dolly")
+	assert.Equal(t, none, m.getVal("/dolly1", 0), "/dolly1")
 }
 
-func TestSearch(t *testing.T) {
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{}, len: 0}, '1'))
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{'5'}, len: 1}, '5'))
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{'6'}, len: 1}, '5'))
-	assert.Equal(t, 1, search(&node{x: [pagesize]uint32{'4'}, len: 1}, '5'))
-	assert.Equal(t, 1, search(&node{x: [pagesize]uint32{'4', '5'}, len: 2}, '5'))
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{'5', '6'}, len: 2}, '5'))
-	assert.Equal(t, 1, search(&node{x: [pagesize]uint32{'4', '5', '6'}, len: 3}, '5'))
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '2'))
-	assert.Equal(t, 0, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '3'))
-	assert.Equal(t, 1, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '4'))
-	assert.Equal(t, 1, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '5'))
-	assert.Equal(t, 2, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '6'))
-	assert.Equal(t, 2, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '7'))
-	assert.Equal(t, 3, search(&node{x: [pagesize]uint32{'3', '5', '7'}, len: 3}, '8'))
+func TestTreeStatic(t *testing.T) {
+	var m Mux
+
+	for i, tc := range staticRoutes {
+		fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
+
+		m.putVal(tc.path, 0, int32(i))
+
+		for j, tc := range staticRoutes[:i+1] {
+			ii := m.getVal(tc.path, 0)
+
+			assert.Equal(t, int32(j), ii, tc.path)
+
+			if t.Failed() {
+				break
+			}
+		}
+
+		fmt.Printf("routes dump\n%s\n", m.dumpString(0))
+
+		if t.Failed() {
+			break
+		}
+	}
+
+	//	if t.Failed() {
+	//		t.Logf("routes dump\n%s", m.dumpString(0))
+	//	}
 }
 
 func BenchmarkTreeStatic(b *testing.B) {
@@ -52,13 +79,8 @@ func BenchmarkTreeStatic(b *testing.B) {
 
 	var m Mux
 
-	h := func(c *Context) error {
-		//	_, err := io.WriteString(c, c.Request.RequestURI)
-		return nil
-	}
-
-	for _, tc := range staticRoutes {
-		m.Handle(tc.method, tc.path, h)
+	for i, tc := range staticRoutes {
+		m.putVal(tc.path, 0, int32(i))
 	}
 
 	b.ResetTimer()
@@ -68,19 +90,12 @@ func BenchmarkTreeStatic(b *testing.B) {
 		n = 1
 	}
 
-	root := m.meth["GET"]
-
+	var val int32
 	for i := 0; i < n; i++ {
 		for _, tc := range staticRoutes {
-			m.nodeGet(tc.path, 0, root)
+			val = m.getVal(tc.path, 0)
 		}
 	}
-}
 
-func fn(f func(*Context) error) uintptr {
-	if f == nil {
-		return 0
-	}
-
-	return **(**uintptr)(unsafe.Pointer(&f))
+	assert.Equal(b, int32(len(staticRoutes)-1), val)
 }
