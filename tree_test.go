@@ -48,7 +48,7 @@ func TestTreeStatic(t *testing.T) {
 	var m Mux
 
 	for i, tc := range staticRoutes {
-		fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
+		//	fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
 
 		m.putVal(tc.path, 0, int32(i))
 
@@ -62,16 +62,50 @@ func TestTreeStatic(t *testing.T) {
 			}
 		}
 
-		fmt.Printf("routes dump\n%s\n", m.dumpString(0))
+		//	fmt.Printf("routes dump\n%s\n", m.dumpString(0))
 
 		if t.Failed() {
 			break
 		}
 	}
 
-	//	if t.Failed() {
-	//		t.Logf("routes dump\n%s", m.dumpString(0))
-	//	}
+	//if t.Failed() {
+	t.Logf("routes dump (%d pages)\n%s", len(m.p), m.dumpString(0))
+	//}
+}
+
+func BenchmarkSearch(b *testing.B) {
+	b.ReportAllocs()
+
+	p := page{
+		x:   [pagesize]int32{'a', 'b', 'c', 'd'},
+		len: pagesize,
+	}
+
+	var j int8
+	for i := 0; i < b.N; i++ {
+		j = search(&p, 'b')
+	}
+
+	assert.Equal(b, int8(1), j)
+}
+
+func BenchmarkSearch2(b *testing.B) {
+	b.ReportAllocs()
+
+	m := Mux{
+		p: []page{{
+			x:   [pagesize]int32{'a', 'b', 'c', 'd'},
+			len: pagesize,
+		}},
+	}
+
+	var j int8
+	for i := 0; i < b.N; i++ {
+		j = m.search(0, 'b')
+	}
+
+	assert.Equal(b, int8(1), j)
 }
 
 func BenchmarkTreeStatic(b *testing.B) {

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	pagesize = 4
+	pagesize = 16
 
 	none int32 = -1
 )
@@ -20,18 +20,14 @@ type (
 
 		x [pagesize]int32
 
-		val int32
-
 		len    int8
 		branch bool
+
+		val int32
 	}
 )
 
 func (m *Mux) getVal(path string, root int32) int32 {
-	if int(root) == len(m.p) {
-		return none
-	}
-
 	p := m.get(path, 0, root)
 	if p == none {
 		return none
@@ -41,21 +37,16 @@ func (m *Mux) getVal(path string, root int32) int32 {
 }
 
 func (m *Mux) putVal(path string, root, val int32) int32 {
-	if int(root) == len(m.p) {
-		m.p = append(m.p, page{
-			pref: path,
-			val:  val,
-		})
-
-		return root
-	}
-
 	p := m.put(path, 0, root)
 	m.p[p].val = val
 	return p
 }
 
 func (m *Mux) get(path string, st int, root int32) (i int32) {
+	if int(root) == len(m.p) {
+		return none
+	}
+
 	i = root
 
 	//	fmt.Printf(">> get  path %v%-*q  page%4x  ***\n", spaces[:st], 24-st, path[st:], i)
@@ -63,12 +54,15 @@ func (m *Mux) get(path string, st int, root int32) (i int32) {
 	//		fmt.Printf("<< get  path %v%-*q  page%4x  *** from %v\n", spaces[:st], 24-st, path[st:], i, loc.Callers(1, 2))
 	//	}()
 
+	p := &m.p[i]
+
 	for {
-		c := common(m.p[i].pref, path[st:])
+
+		c := common(p.pref, path[st:])
 
 		//		fmt.Printf("   get  path %v%-*q  page%4x  cp%2x\n", spaces[:st], 24-st, path[st:], i, c)
 
-		if c != len(m.p[i].pref) {
+		if c != len(p.pref) {
 			return none
 		}
 
@@ -78,17 +72,19 @@ func (m *Mux) get(path string, st int, root int32) (i int32) {
 			return i
 		}
 
-		j := search(&m.p[i], path[c])
+		j := search(p, path[c])
 
 		//		fmt.Printf("   get  path %v%-*q  page%4x  j %2x of %v  char %c\n", spaces[:st], 24-st, path[st:], i, j, m.ll(i), path[c])
 
-		if m.p[i].branch || j < m.p[i].len && path[c] == byte(m.p[i].x[j]) {
-			if m.p[i].branch && (j == m.p[i].len || path[c] < byte(m.p[i].x[j]) && j != 0) {
+		if p.branch || j < p.len && path[c] == byte(p.x[j]) {
+			if p.branch && (j == p.len || j != 0 && path[c] < byte(p.x[j])) {
 				j--
 			}
 
-			i = m.p[i].x[j] >> 8
+			i = p.x[j] >> 8
 			st = c
+
+			p = &m.p[i]
 
 			continue
 		}
@@ -98,6 +94,15 @@ func (m *Mux) get(path string, st int, root int32) (i int32) {
 }
 
 func (m *Mux) put(path string, st int, root int32) (i int32) {
+	if int(root) == len(m.p) {
+		m.p = append(m.p, page{
+			pref: path,
+			val:  none,
+		})
+
+		return root
+	}
+
 	i = root
 
 	for {
@@ -175,6 +180,8 @@ func (m *Mux) splitTrie(i int32, c int) {
 	m.p[i].x[0] = ch<<8 | int32(m.p[ch].pref[0])
 	m.p[i].len = 1
 	m.p[i].branch = false
+
+	m.p[i].val = none
 }
 
 func (m *Mux) insert(i int32, path string, j int8) (ch int32) {
@@ -190,7 +197,9 @@ func (m *Mux) insert(i int32, path string, j int8) (ch int32) {
 
 func (m *Mux) new() (i int32) {
 	i = int32(len(m.p))
-	m.p = append(m.p, page{})
+	m.p = append(m.p, page{
+		val: none,
+	})
 	return i
 }
 
@@ -201,6 +210,22 @@ func search(p *page, q byte) (j int8) {
 		j = l + (r-l)>>1
 
 		if q <= byte(p.x[j]) {
+			r = j
+		} else {
+			l = j + 1
+		}
+	}
+
+	return l
+}
+
+func (m *Mux) search(i int32, q byte) (j int8) {
+	l, r := int8(0), m.p[i].len
+
+	for l < r {
+		j = l + (r-l)>>1
+
+		if q <= byte(m.p[i].x[j]) {
 			r = j
 		} else {
 			l = j + 1
@@ -224,6 +249,13 @@ func common(a, b string) (c int) {
 }
 
 func (m *Mux) dumpString(i int32) string {
+	if i == none {
+		return "<none>"
+	}
+	if len(m.p) == 0 {
+		return "<empty>"
+	}
+
 	var b bytes.Buffer
 
 	m.dump(&b, i, 0, 0)
