@@ -43,8 +43,6 @@ loop:
 			return p.h
 		}
 
-		_ = path[i]
-
 		for j := 0; j < len(p.k); j++ {
 			if p.k[j] == path[i] {
 				p = p.s[j]
@@ -101,9 +99,7 @@ func (m *Mux) put(meth, path string, h HandlerFunc) (sub *page) {
 
 		sub = p.sub(path[c])
 		if sub != nil {
-			defer func(p *page) {
-				sort.Sort(bysize{p})
-			}(p)
+			defer p.sort()
 
 			path = path[c:]
 			p = sub
@@ -115,6 +111,7 @@ func (m *Mux) put(meth, path string, h HandlerFunc) (sub *page) {
 		sub.h = h
 
 		p.setsub(sub.pref[0], sub)
+		p.sort()
 
 		return sub
 	}
@@ -159,14 +156,14 @@ func (m *Mux) dump(w io.Writer, p *page, d, st int) {
 		valPad = 0
 	}
 
-	fmt.Fprintf(w, "   dump %v%d%v  pref %v%-24q%v  h %p  %v\n", spaces[:2*d], d, spaces[:2*(maxdepth-d)], spaces[:st], p.pref, spaces[:valPad], p.h, m.ll(p))
+	fmt.Fprintf(w, "   dump %v%d%v  pref %v%-24q%v  h %p  %v\n", spaces[:2*d], d, spaces[:2*(maxdepth-d)], spaces[:st], p.pref, spaces[:valPad], p.h, p.ll())
 	//	fmt.Fprintf(w, "%vpage%v %4x  pref %-24q  val %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, m.p[i].pref, m.p[i].val, x, m.p[i].len, m.ll(i))
 	for _, sub := range p.s {
 		m.dump(w, sub, d+1, st+len(p.pref))
 	}
 }
 
-func (m *Mux) ll(p *page) string {
+func (p *page) ll() string {
 	var b bytes.Buffer
 
 	b.WriteByte('[')
@@ -216,45 +213,12 @@ func (p *page) sub(f byte) *page {
 	return nil
 }
 
-func (p *page) setsub(f byte, sub *page) *page {
+func (p *page) setsub(f byte, sub *page) {
 	p.k = append(p.k, f)
 	p.s = append(p.s, sub)
-
-	sort.Sort(bysize{p})
-
-	return nil
 }
 
-func (p *page) sub1(path string) *page {
-	j := p.k[path[0]-0x20]
-	//	if j == -1 {
-	//		return nil
-	//	}
-
-	return p.s[j]
-}
-
-func (p *page) setSub1(path string, sub *page) {
-	//	p.k[path[0]-0x20] = int8(len(p.s))
-	//	p.s = append(p.s, sub)
-}
-
-func (p *page) sub0(path string) *page {
-	for j, k := range p.k {
-		//	if k == int8(path[0]) {
-		_ = k
-		return p.s[j]
-		//	}
-	}
-
-	return nil
-}
-
-func (p *page) setSub0(path string, sub *page) {
-	//	p.k = append(p.k, path[0])
-	//	p.k[len(p.s)] = int8(path[0])
-	p.s = append(p.s, sub)
-
+func (p *page) sort() {
 	sort.Sort(bysize{p})
 }
 
