@@ -7,8 +7,10 @@ import (
 
 type (
 	Mux struct {
-		//	root *page
 		meth map[string]*page
+
+		buf [256]page
+		i   int
 	}
 
 	HandlerFunc func(c *Context) error
@@ -67,7 +69,7 @@ func (m *Mux) match(meth, path string, c *Context) HandlerFunc {
 		return nil
 	}
 
-	page := m.get(path, 0, root)
+	page := m.get(path, root)
 	if page == nil {
 		return nil
 	}

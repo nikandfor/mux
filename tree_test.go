@@ -60,7 +60,7 @@ func TestTreeStatic(t *testing.T) {
 	}
 
 	for i, tc := range staticRoutes {
-		//	fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
+		fmt.Printf("ADD HANDLER %v %v\n", tc.method, tc.path)
 
 		m.handle("GET", tc.path, h(tc.path))
 
@@ -75,7 +75,7 @@ func TestTreeStatic(t *testing.T) {
 			}
 		}
 
-		//	fmt.Printf("routes dump\n%s\n", m.dumpString(m.root))
+		fmt.Printf("routes dump\n%s\n", m.dumpString(m.meth["GET"]))
 
 		if t.Failed() {
 			break
