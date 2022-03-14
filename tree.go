@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sort"
+	"regexp"
 )
 
 const (
@@ -23,95 +23,143 @@ type (
 
 		k []byte
 		s []*page
+
+		wildcard *page
+
+		// wildcard page
+
+		name    string
+		re      *regexp.Regexp
+		pattern string
 	}
 )
 
-func (m *Mux) get(meth, path string, c *Context) (h HandlerFunc) {
-	p := m.meth[meth]
+func (m *Mux) get(p *page, path string, c *Context) (leaf *page) {
 	if p == nil {
 		return nil
 	}
 
-loop:
+	type wild struct {
+		p      *page
+		path   string
+		params int
+	}
+
+	var wwbuf [20]wild
+	ww := wwbuf[:0]
+
 	for {
-		i := common(p.pref, path)
-		if i != len(p.pref) {
-			return nil
+		if p == nil || len(p.pref) > len(path) || p.pref != path[:len(p.pref)] {
+			if len(ww) == 0 {
+				return nil
+			}
+
+			l := len(ww) - 1
+			w := ww[l]
+			ww = ww[:l]
+
+			p, path = w.p, w.path
+
+			//	println("pattern match", path, p.pattern, p.re)
+
+			var val string
+			if p.re != nil {
+				if !p.re.MatchString(path) {
+					p = nil
+					continue
+				}
+
+				val = p.re.FindString(path)
+			} else if p.pattern == "*" {
+				val = path
+			} else if p.pattern == "\\w+" {
+				val = path[:index(path, 0, '/')]
+			}
+
+			if c != nil {
+				c.Params = c.Params[:w.params]
+				c.Params = append(c.Params, Param{
+					Name:  p.name,
+					Value: val,
+				})
+			}
+
+			path = path[len(val):]
+
+			continue
+		} else if len(p.pref) == len(path) {
+			return p
 		}
 
-		if i == len(path) {
-			return p.h
-		}
+		path = path[len(p.pref):]
 
-		for j := 0; j < len(p.k); j++ {
-			if p.k[j] == path[i] {
-				p = p.s[j]
-				path = path[i:]
-				continue loop
+		var sub *page
+
+		for j, k := range p.k {
+			if k == path[0] {
+				sub = p.s[j]
+
+				break
 			}
 		}
 
-		return nil
+		if p.wildcard != nil {
+			params := 0
+			if c != nil {
+				params = len(c.Params)
+			}
+
+			ww = append(ww, wild{
+				p:      p.wildcard,
+				path:   path,
+				params: params,
+			})
+		}
+
+		p = sub
 	}
 }
 
-func (m *Mux) put(meth, path string, h HandlerFunc) (sub *page) {
-	if m.meth == nil {
-		m.meth = make(map[string]*page, 16)
-	}
+func (m *Mux) put(p *page, path string) (sub *page) {
+	if p.pref == "" && p.name == "" { // new root node
+		p.pref = path
 
-	p := m.meth[meth]
-	if p == nil {
-		p = m.new(path)
-		p.h = h
-
-		m.meth[meth] = p
-
-		return
+		return p
 	}
 
 	for {
 		c := common(p.pref, path)
 
 		if c != len(p.pref) {
-			sub = m.new(p.pref[c:])
-			sub.h = p.h
-			sub.k = p.k
-			sub.s = p.s
+			cp := *p
+			sub = &cp
 
-			p.pref = p.pref[:c]
-			p.h = nil
-			p.k = nil
-			p.s = nil
+			sub.pref = p.pref[c:]
+
+			*p = page{
+				pref: p.pref[:c],
+			}
 
 			p.setsub(sub.pref[0], sub)
 		}
 
 		if c == len(path) {
-			if p.h != nil {
-				panic(path)
-			}
-
-			p.h = h
-
 			return p
 		}
 
 		sub = p.sub(path[c])
 		if sub != nil {
-			defer p.sort()
-
 			path = path[c:]
 			p = sub
 
 			continue
 		}
 
-		sub = m.new(path[c:])
-		sub.h = h
+		sub = &page{
+			pref: path[c:],
+		}
 
 		p.setsub(sub.pref[0], sub)
-		p.sort()
 
 		return sub
 	}
@@ -151,15 +199,24 @@ func (m *Mux) dump(w io.Writer, p *page, d, st int) {
 		return
 	}
 
-	valPad := 12 - st
+	pref := p.pref
+	if p.name != "" {
+		pref = "{" + p.name + ":" + p.pattern + "}" + p.pref
+	}
+
+	valPad := 36 - st - len(pref)
 	if valPad < 0 {
 		valPad = 0
 	}
 
-	fmt.Fprintf(w, "   dump %v%d%v  pref %v%-24q%v  h %p  %v\n", spaces[:2*d], d, spaces[:2*(maxdepth-d)], spaces[:st], p.pref, spaces[:valPad], p.h, p.ll())
+	fmt.Fprintf(w, "   dump %v%d%v  pref %v%q%v  h %p  %v\n", spaces[:2*d], d, spaces[:2*(maxdepth-d)], spaces[:st], pref, spaces[:valPad], p.h, p.ll())
 	//	fmt.Fprintf(w, "%vpage%v %4x  pref %-24q  val %4x  %c  childs %d  %v\n", spaces[:2*d], spaces[:2*(10-d)], i, m.p[i].pref, m.p[i].val, x, m.p[i].len, m.ll(i))
 	for _, sub := range p.s {
-		m.dump(w, sub, d+1, st+len(p.pref))
+		m.dump(w, sub, d+1, st+len(pref))
+	}
+
+	if p.wildcard != nil {
+		m.dump(w, p.wildcard, d+1, st+len(pref))
 	}
 }
 
@@ -169,7 +226,7 @@ func (p *page) ll() string {
 	b.WriteByte('[')
 
 	for j, k := range p.k {
-		fmt.Fprintf(&b, " %q:%d", byte(k), count(p.s[j]))
+		fmt.Fprintf(&b, " %q:%d", byte(k), countHandlers(p.s[j]))
 	}
 
 	b.WriteByte(']')
@@ -177,33 +234,7 @@ func (p *page) ll() string {
 	return b.String()
 }
 
-func (m *Mux) new(pref string) (p *page) {
-	if m.i < len(m.buf) {
-		p = &m.buf[m.i]
-		m.i++
-
-		*p = page{
-			pref: pref,
-			//	k:    nonek,
-		}
-
-		return p
-	}
-
-	p = &page{
-		pref: pref,
-		//	k:    nonek,
-	}
-
-	return p
-}
-
 func (p *page) sub(f byte) *page {
-
-	if !sort.IsSorted(bysize{p}) {
-		panic("not sorter")
-	}
-
 	for j, k := range p.k {
 		if k == f {
 			return p.s[j]
@@ -218,35 +249,17 @@ func (p *page) setsub(f byte, sub *page) {
 	p.s = append(p.s, sub)
 }
 
-func (p *page) sort() {
-	sort.Sort(bysize{p})
-}
-
-func (p *page) Len() int           { return len(p.s) }
-func (p *page) Less(i, j int) bool { return p.k[i] < p.k[j] }
-func (p *page) Swap(i, j int) {
-	p.s[i], p.s[j] = p.s[j], p.s[i]
-	p.k[i], p.k[j] = p.k[j], p.k[i]
-}
-
-type bysize struct {
-	*page
-}
-
-func (p bysize) Len() int           { return len(p.s) }
-func (p bysize) Less(i, j int) bool { return count(p.s[i]) > count(p.s[j]) }
-func (p bysize) Swap(i, j int) {
-	p.s[i], p.s[j] = p.s[j], p.s[i]
-	p.k[i], p.k[j] = p.k[j], p.k[i]
-}
-
-func count(p *page) (sum int) {
+func countHandlers(p *page) (sum int) {
 	if p.h != nil {
 		sum++
 	}
 
 	for _, s := range p.s {
-		sum += count(s)
+		sum += countHandlers(s)
+	}
+
+	if p.wildcard != nil {
+		sum += countHandlers(p.wildcard)
 	}
 
 	return
