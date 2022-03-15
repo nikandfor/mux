@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"regexp"
 )
 
 const (
@@ -19,7 +18,7 @@ type (
 	page struct {
 		pref string
 
-		h HandlerFunc
+		h []HandlerFunc
 
 		k []byte
 		s []*page
@@ -29,9 +28,11 @@ type (
 		// wildcard page
 
 		name    string
-		re      *regexp.Regexp
 		pattern string
+		eat     eater
 	}
+
+	eater func(string) (string, bool)
 )
 
 func (m *Mux) get(p *page, path string, c *Context) (leaf *page) {
@@ -62,18 +63,10 @@ func (m *Mux) get(p *page, path string, c *Context) (leaf *page) {
 
 			//	println("pattern match", path, p.pattern, p.re)
 
-			var val string
-			if p.re != nil {
-				if !p.re.MatchString(path) {
-					p = nil
-					continue
-				}
-
-				val = p.re.FindString(path)
-			} else if p.pattern == "*" {
-				val = path
-			} else if p.pattern == "\\w+" {
-				val = path[:index(path, 0, '/')]
+			val, ok := p.eat(path)
+			if !ok {
+				p = nil
+				continue
 			}
 
 			if c != nil {

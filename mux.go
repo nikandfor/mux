@@ -11,23 +11,37 @@ type (
 	Mux struct {
 		meth map[string]*page
 
+		RouterGroup
+
 		NotFoundHandler HandlerFunc
+	}
+
+	RouterGroup struct {
+		m *Mux
+
+		path     string
+		handlers []HandlerFunc
 	}
 
 	HandlerFunc func(c *Context) error
 )
 
 func New() *Mux {
-	return &Mux{}
+	m := &Mux{}
+
+	m.RouterGroup = RouterGroup{
+		m:    m,
+		path: "/",
+	}
+
+	return m
 }
 
-func (m *Mux) Handle(meth, path string, h HandlerFunc) {
-	path = pathpkg.Clean(path)
-
-	m.handle(meth, path, h)
+func (g *RouterGroup) Handle(meth, path string, h ...HandlerFunc) {
+	g.m.handle(meth, path, h)
 }
 
-func (m *Mux) Lookup(meth, path string, c *Context) HandlerFunc {
+func (m *Mux) Lookup(meth, path string, c *Context) []HandlerFunc {
 	return m.match(meth, path, c)
 }
 
@@ -37,13 +51,15 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	h := m.match(req.Method, req.RequestURI, c)
 	if h == nil {
-		h = m.NotFoundHandler
+		//	h = m.NotFoundHandler
 	}
 
 	_ = h(c)
 }
 
-func (m *Mux) handle(meth, path string, h HandlerFunc) {
+func (m *Mux) handle(meth, path string, h []HandlerFunc) {
+	path = pathpkg.Clean(path)
+
 	if m.meth == nil {
 		m.meth = make(map[string]*page, 16)
 	}
@@ -72,7 +88,8 @@ func (m *Mux) handle(meth, path string, h HandlerFunc) {
 
 		st = i + 1
 
-		var name, pattern, re string
+		var name, pattern string
+		var eat eater
 		switch path[i] {
 		case '{':
 			i = indexAny(path, i, "}:")
@@ -81,9 +98,10 @@ func (m *Mux) handle(meth, path string, h HandlerFunc) {
 				st = i + 1
 				i = index(path, i, '}')
 				pattern = path[st:i]
-				re = pattern
+				eat = reEater(pattern)
 			} else {
 				pattern = `\w+`
+				eat = colonEater
 			}
 			if path[i] != '}' {
 				panic("no pattern closing bracket")
@@ -93,10 +111,12 @@ func (m *Mux) handle(meth, path string, h HandlerFunc) {
 			i = index(path, i, '/')
 			name = path[st:i]
 			pattern = `\w+`
+			eat = colonEater
 		default:
 			i = len(path)
 			name = path[st:i]
 			pattern = `*`
+			eat = allEater
 		}
 
 		//	println("wname", name, "re", re, "path", path, "i", i)
@@ -109,10 +129,7 @@ func (m *Mux) handle(meth, path string, h HandlerFunc) {
 			p.wildcard = &page{
 				name:    name,
 				pattern: pattern,
-			}
-
-			if re != "" {
-				p.wildcard.re = regexp.MustCompile(`^` + re)
+				eat:     eat,
 			}
 		}
 
@@ -129,7 +146,7 @@ func (m *Mux) handle(meth, path string, h HandlerFunc) {
 	p.h = h
 }
 
-func (m *Mux) match(meth, path string, c *Context) HandlerFunc {
+func (m *Mux) match(meth, path string, c *Context) []HandlerFunc {
 	p := m.meth[meth]
 	if p == nil {
 		return nil
@@ -141,6 +158,9 @@ func (m *Mux) match(meth, path string, c *Context) HandlerFunc {
 	}
 
 	return p.h
+}
+
+func (g *RouterGroup) Use(m ...HandlerFunc) {
 }
 
 func index(s string, st int, c byte) (i int) {
@@ -163,4 +183,24 @@ func indexAny(s string, st int, c string) (i int) {
 	}
 
 	return i
+}
+
+func reEater(pattern string) eater {
+	re := regexp.MustCompile(`^` + pattern)
+
+	return eater(func(path string) (val string, ok bool) {
+		if !re.MatchString(path) {
+			return "", false
+		}
+
+		return re.FindString(path), true
+	})
+}
+
+func colonEater(path string) (string, bool) {
+	return path[:index(path, 0, '/')], true
+}
+
+func allEater(path string) (string, bool) {
+	return path, true
 }
