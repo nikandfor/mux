@@ -288,8 +288,8 @@ func (n *node) ll() string {
 
 	b.WriteByte('[')
 
-	for k, s := range n.s {
-		fmt.Fprintf(&b, " %q:%d", k, countHandlers(s))
+	for i, k := range n.k {
+		fmt.Fprintf(&b, " %q:%d", k, countHandlers(n.s[i]))
 	}
 
 	b.WriteByte(']')

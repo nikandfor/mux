@@ -2,6 +2,7 @@ package mux
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -17,6 +18,11 @@ type (
 		Params
 
 		QueryValues url.Values
+
+		Responder
+		Encoder
+
+		m *Mux
 
 		i   int
 		hc  HandlersChain
@@ -58,6 +64,8 @@ func FreeContext(c *Context) {
 
 	c.Params = c.Params[:0]
 	c.QueryValues = nil
+
+	c.m = nil
 
 	c.i = 0
 	c.hc = nil
@@ -108,5 +116,10 @@ func (c *Context) Query(k string) (v string) {
 func (c *Context) LookupQuery(k string) (v string, ok bool) {
 	v = c.Query(k)
 	_, ok = c.QueryValues[k]
+	return
+}
+
+func (c *Context) ClientIP() (ip string) {
+	ip, _, _ = net.SplitHostPort(c.Request.RemoteAddr)
 	return
 }
