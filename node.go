@@ -153,7 +153,11 @@ func (m *Mux) put(root *node, path string) (n *node) {
 			if eat == nil {
 				st = i + 1
 				end := index(path, st, '/')
-				eat = eatUntil(path[st:end])
+				if end == st {
+					eat = eatSeg
+				} else {
+					eat = eatUntil(path[st:end])
+				}
 			}
 
 			i++
@@ -328,6 +332,10 @@ func eatSeg(path string) (string, bool) {
 }
 
 func eatUntil(until string) eater {
+	if len(until) == 0 {
+		panic("empty until")
+	}
+
 	return eater(func(path string) (val string, ok bool) {
 		i := index(path, 0, until[0])
 		ok = strings.HasPrefix(path[i:], until)

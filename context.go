@@ -3,6 +3,7 @@ package mux
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"sync"
 )
 
@@ -10,10 +11,16 @@ type (
 	Context struct {
 		context.Context
 
-		http.ResponseWriter
+		ResponseWriter http.ResponseWriter
 		*http.Request
 
 		Params
+
+		QueryValues url.Values
+
+		i   int
+		hc  HandlersChain
+		hc2 HandlersChain
 	}
 
 	Params []Param
@@ -41,9 +48,38 @@ func NewContext(w http.ResponseWriter, req *http.Request) (c *Context) {
 }
 
 func FreeContext(c *Context) {
+	c.Context = nil
+	c.ResponseWriter = nil
+	c.Request = nil
+
+	for i := range c.Params {
+		c.Params[i] = Param{}
+	}
+
 	c.Params = c.Params[:0]
+	c.QueryValues = nil
+
+	c.i = 0
+	c.hc = nil
+	c.hc2 = nil
 
 	contextPool.Put(c)
+}
+
+func (c *Context) Next() (err error) {
+	for c.i < len(c.hc)+len(c.hc2) {
+		c.i++
+		if c.i <= len(c.hc) {
+			err = c.hc[c.i-1](c)
+		} else {
+			err = c.hc2[c.i-1-len(c.hc)](c)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ps Params) LookupParam(name string) (string, bool) {
@@ -58,5 +94,19 @@ func (ps Params) LookupParam(name string) (string, bool) {
 
 func (ps Params) Param(name string) (v string) {
 	v, _ = ps.LookupParam(name)
+	return
+}
+
+func (c *Context) Query(k string) (v string) {
+	if c.QueryValues == nil {
+		c.QueryValues = c.Request.URL.Query()
+	}
+
+	return c.QueryValues.Get(k)
+}
+
+func (c *Context) LookupQuery(k string) (v string, ok bool) {
+	v = c.Query(k)
+	_, ok = c.QueryValues[k]
 	return
 }

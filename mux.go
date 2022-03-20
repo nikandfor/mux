@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"net/http"
 	pathpkg "path"
 )
 
@@ -9,6 +10,8 @@ type (
 		RouterGroup
 
 		meth map[string]*node
+
+		NotFound HandlersChain
 	}
 
 	RouterGroup struct {
@@ -25,7 +28,10 @@ type (
 )
 
 func New() *Mux {
-	m := &Mux{}
+	m := &Mux{
+		meth:     make(map[string]*node),
+		NotFound: HandlersChain{NotFound},
+	}
 
 	m.RouterGroup = RouterGroup{
 		m:        m,
@@ -52,7 +58,11 @@ func (g *RouterGroup) Group(path string, hs ...HandlerFunc) *RouterGroup {
 }
 
 func (g *RouterGroup) Handle(meth, path string, hs ...HandlerFunc) {
-	g.m.handle(meth, pathpkg.Join(g.basePath, path), append(g.hs[:len(g.hs):len(g.hs)], hs...))
+	hc := make(HandlersChain, len(g.hs)+len(hs))
+	copy(hc, g.hs)
+	copy(hc[len(g.hs):], hs)
+
+	g.m.handle(meth, pathpkg.Join(g.basePath, path), hc)
 }
 
 func (m *Mux) Lookup(meth, path string, c *Context) (h HandlersChain) {
@@ -74,10 +84,6 @@ func (m *Mux) Lookup(meth, path string, c *Context) (h HandlersChain) {
 func (m *Mux) handle(meth, path string, hs []HandlerFunc) {
 	path = pathpkg.Clean(path)
 
-	if m.meth == nil {
-		m.meth = make(map[string]*node)
-	}
-
 	root := m.meth[meth]
 	if root == nil {
 		root = &node{}
@@ -91,4 +97,18 @@ func (m *Mux) handle(meth, path string, hs []HandlerFunc) {
 	}
 
 	node.h = hs
+}
+
+func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c := NewContext(w, req)
+	defer FreeContext(c)
+
+	c.hc = m.Lookup(req.Method, req.URL.Path, c)
+
+	if c.hc == nil {
+		c.hc = m.RouterGroup.hs
+		c.hc2 = m.NotFound
+	}
+
+	_ = c.Next()
 }
