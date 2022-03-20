@@ -2,7 +2,6 @@ package mux
 
 import (
 	"net/http"
-	pathpkg "path"
 )
 
 type (
@@ -11,7 +10,7 @@ type (
 
 		meth map[string]*node
 
-		NotFound HandlersChain
+		NotFound HandlerFunc
 	}
 
 	RouterGroup struct {
@@ -19,10 +18,10 @@ type (
 
 		basePath string
 
-		hs HandlersChain
+		ms []Middleware
 	}
 
-	HandlersChain []HandlerFunc
+	Middleware func(next HandlerFunc) HandlerFunc
 
 	HandlerFunc func(c *Context) error
 )
@@ -30,7 +29,7 @@ type (
 func New() *Mux {
 	m := &Mux{
 		meth:     make(map[string]*node),
-		NotFound: HandlersChain{NotFound},
+		NotFound: NotFound,
 	}
 
 	m.RouterGroup = RouterGroup{
@@ -41,31 +40,29 @@ func New() *Mux {
 	return m
 }
 
-func (g *RouterGroup) Use(hs ...HandlerFunc) {
-	if len(hs) == 0 {
+func (g *RouterGroup) Use(ms ...Middleware) {
+	if len(ms) == 0 {
 		return
 	}
 
-	g.hs = append(g.hs, hs...)
+	g.ms = append(g.ms, ms...)
 }
 
-func (g *RouterGroup) Group(path string, hs ...HandlerFunc) *RouterGroup {
+func (g *RouterGroup) Group(path string, ms ...Middleware) *RouterGroup {
 	return &RouterGroup{
 		m:        g.m,
-		basePath: g.basePath + path,
-		hs:       append(g.hs[:len(g.hs):len(g.hs)], hs...),
+		basePath: JoinPath(g.basePath, path),
+		ms:       append(g.ms[:len(g.ms):len(g.ms)], ms...),
 	}
 }
 
-func (g *RouterGroup) Handle(meth, path string, hs ...HandlerFunc) {
-	hc := make(HandlersChain, len(g.hs)+len(hs))
-	copy(hc, g.hs)
-	copy(hc[len(g.hs):], hs)
+func (g *RouterGroup) Handle(meth, path string, h HandlerFunc, ms ...Middleware) {
+	ms = append(g.ms[:len(g.ms):len(g.ms)], ms...)
 
-	g.m.handle(meth, g.basePath+path, hc)
+	g.m.handle(meth, JoinPath(g.basePath, path), ms, h)
 }
 
-func (m *Mux) Lookup(meth, path string, c *Context) (h HandlersChain) {
+func (m *Mux) Lookup(meth, path string, c *Context) (h HandlerFunc) {
 	root := m.meth[meth]
 	if root == nil {
 		return nil
@@ -81,14 +78,9 @@ func (m *Mux) Lookup(meth, path string, c *Context) (h HandlersChain) {
 	return node.h
 }
 
-func (m *Mux) handle(meth, path string, hs []HandlerFunc) {
+func (m *Mux) handle(meth, path string, ms []Middleware, h HandlerFunc) {
 	if path == "" || path[0] != '/' {
 		panic("bad path")
-	}
-
-	cpath := pathpkg.Clean(path)
-	if path[len(path)-1] == '/' {
-		cpath += "/"
 	}
 
 	root := m.meth[meth]
@@ -97,13 +89,17 @@ func (m *Mux) handle(meth, path string, hs []HandlerFunc) {
 		m.meth[meth] = root
 	}
 
-	node := m.put(root, cpath)
+	node := m.put(root, path)
 
 	if node.h != nil {
-		panic("path collision: " + cpath)
+		panic("path collision: " + path)
 	}
 
-	node.h = hs
+	for i := len(ms) - 1; i >= 0; i-- {
+		h = ms[i](h)
+	}
+
+	node.h = h
 }
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -112,44 +108,43 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	c.m = m
 
-	c.hc = m.Lookup(req.Method, req.URL.Path, c)
+	h := m.Lookup(req.Method, req.URL.Path, c)
 
-	if c.hc == nil {
-		c.hc = m.RouterGroup.hs
-		c.hc2 = m.NotFound
+	if h == nil {
+		h = m.NotFound
 	}
 
-	_ = c.Next()
+	_ = h(c)
 }
 
-func (g *RouterGroup) GET(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodGet, path, hs...)
+func (g *RouterGroup) GET(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodGet, path, h, ms...)
 }
 
-func (g *RouterGroup) HEAD(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodHead, path, hs...)
+func (g *RouterGroup) HEAD(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodHead, path, h, ms...)
 }
 
-func (g *RouterGroup) POST(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodPost, path, hs...)
+func (g *RouterGroup) POST(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodPost, path, h, ms...)
 }
 
-func (g *RouterGroup) PUT(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodPut, path, hs...)
+func (g *RouterGroup) PUT(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodPut, path, h, ms...)
 }
 
-func (g *RouterGroup) PATCH(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodPatch, path, hs...)
+func (g *RouterGroup) PATCH(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodPatch, path, h, ms...)
 }
 
-func (g *RouterGroup) DELETE(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodDelete, path, hs...)
+func (g *RouterGroup) DELETE(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodDelete, path, h, ms...)
 }
 
-func (g *RouterGroup) CONNECT(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodConnect, path, hs...)
+func (g *RouterGroup) CONNECT(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodConnect, path, h, ms...)
 }
 
-func (g *RouterGroup) OPTIONS(path string, hs ...HandlerFunc) {
-	g.Handle(http.MethodOptions, path, hs...)
+func (g *RouterGroup) OPTIONS(path string, h HandlerFunc, ms ...Middleware) {
+	g.Handle(http.MethodOptions, path, h, ms...)
 }

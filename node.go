@@ -12,7 +12,7 @@ type (
 	node struct {
 		pref string
 
-		h HandlersChain
+		h HandlerFunc
 
 		k []byte
 		s []*node

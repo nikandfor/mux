@@ -23,10 +23,6 @@ type (
 		Encoder
 
 		m *Mux
-
-		i   int
-		hc  HandlersChain
-		hc2 HandlersChain
 	}
 
 	Params []Param
@@ -67,27 +63,7 @@ func FreeContext(c *Context) {
 
 	c.m = nil
 
-	c.i = 0
-	c.hc = nil
-	c.hc2 = nil
-
 	contextPool.Put(c)
-}
-
-func (c *Context) Next() (err error) {
-	for c.i < len(c.hc)+len(c.hc2) {
-		c.i++
-		if c.i <= len(c.hc) {
-			err = c.hc[c.i-1](c)
-		} else {
-			err = c.hc2[c.i-1-len(c.hc)](c)
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (ps Params) LookupParam(name string) (string, bool) {

@@ -316,8 +316,8 @@ func TestGithub(t *testing.T) {
 				req.RequestURI = replace[tc.path]
 
 				h := m.Lookup(tc.method, req.RequestURI, c)
-				if assert.True(t, len(h) != 0 && h[0] != nil, "%v %v", tc.method, req.RequestURI) {
-					err := h[0](c)
+				if assert.True(t, h != nil, "%v %v", tc.method, req.RequestURI) {
+					err := h(c)
 					assert.NoError(t, err)
 					assert.Equal(t, tc.path, hpath)
 					assert.Equal(t, req.RequestURI, hreq)
