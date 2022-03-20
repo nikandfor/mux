@@ -14,7 +14,8 @@ type (
 
 		h HandlersChain
 
-		s map[byte]*node
+		k []byte
+		s []*node
 
 		wild *node
 
@@ -53,7 +54,13 @@ func (m *Mux) get(root *node, path string, c *Context) (n *node) {
 
 			path = path[len(n.pref):]
 
-			sub := n.s[path[0]]
+			var sub *node
+			for i, k := range n.k {
+				if path[0] == k {
+					sub = n.s[i]
+					break
+				}
+			}
 
 			if n.wild != nil {
 				//	fmt.Printf("save wild %p %+v\n", n.wild, n.wild)
@@ -194,6 +201,7 @@ func (m *Mux) putStatic(root *node, path string) (n *node) {
 			sub := &node{
 				pref: n.pref[c:],
 				h:    n.h,
+				k:    n.k,
 				s:    n.s,
 				wild: n.wild,
 			}
@@ -202,9 +210,8 @@ func (m *Mux) putStatic(root *node, path string) (n *node) {
 			n.h = nil
 			n.wild = nil
 
-			n.s = map[byte]*node{
-				sub.pref[0]: sub,
-			}
+			n.k = []byte{sub.pref[0]}
+			n.s = []*node{sub}
 		}
 
 		if c == len(path) {
@@ -213,7 +220,14 @@ func (m *Mux) putStatic(root *node, path string) (n *node) {
 
 		path = path[c:]
 
-		sub := n.s[path[0]]
+		var sub *node
+		for i, k := range n.k {
+			if path[0] == k {
+				sub = n.s[i]
+				break
+			}
+		}
+
 		if sub != nil {
 			n = sub
 			continue
@@ -223,11 +237,8 @@ func (m *Mux) putStatic(root *node, path string) (n *node) {
 			pref: path,
 		}
 
-		if n.s == nil {
-			n.s = make(map[byte]*node)
-		}
-
-		n.s[path[0]] = sub
+		n.k = append(n.k, path[0])
+		n.s = append(n.s, sub)
 
 		return sub
 	}
