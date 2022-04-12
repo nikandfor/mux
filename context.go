@@ -19,8 +19,8 @@ type (
 
 		QueryValues url.Values
 
-		Responder
-		Encoder
+		Respond ResponderFunc
+		Encode  EncoderFunc
 
 		m *Mux
 	}
@@ -61,6 +61,9 @@ func FreeContext(c *Context) {
 	c.Params = c.Params[:0]
 	c.QueryValues = nil
 
+	c.Respond = nil
+	c.Encode = nil
+
 	c.m = nil
 
 	contextPool.Put(c)
@@ -96,6 +99,13 @@ func (c *Context) LookupQuery(k string) (v string, ok bool) {
 }
 
 func (c *Context) ClientIP() (ip string) {
+	for _, n := range c.m.ForwardedFor {
+		ip = c.Request.Header.Get(n)
+		if ip != "" {
+			return
+		}
+	}
+
 	ip, _, _ = net.SplitHostPort(c.Request.RemoteAddr)
 	return
 }
