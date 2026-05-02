@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -13,11 +14,12 @@ type (
 
 		ServeMux http.ServeMux
 
-		// Middlewares that are run independent of if handler was found or not.
+		// Middlewares that run regardless of whether a handler was found or not.
 		Middlewares []Middleware
 		NotFound    Handler
 
-		HandlerHook func(pattern string, h Handler, ms []Middleware)
+		// OnHandle is called each time handler is registered. If set.
+		OnHandle func(pattern string, h Handler, ms []Middleware)
 	}
 
 	Router struct {
@@ -30,46 +32,50 @@ type (
 
 	Handler    = func(c *Context, w http.ResponseWriter, req *http.Request) error
 	Middleware = Handler
+
+	contextKey struct{}
 )
 
 func New() *Mux {
-	m := &Mux{
-		NotFound: notFound,
-	}
+	m := &Mux{}
 	m.Router.m = m
 
 	return m
 }
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	_, pattern := m.ServeMux.Handler(req)
-	if pattern == "" {
-		return
-	}
-
-	m.ServeMux.ServeHTTP(w, req)
-}
-
-func (m *Mux) handle(w http.ResponseWriter, req *http.Request, hs []Handler) {
 	ctx := req.Context()
 
 	c := &Context{
 		Context: ctx,
 
-		handlers: m.Middlewares,
+		pre:   m.Middlewares,
+		route: m.route,
 	}
 
-	err := c.Next(w, req)
-	if err != nil {
-		return
+	_ = c.Next(w, req) // error should be handled by middlewares
+}
+
+func (m *Mux) route(c *Context, w http.ResponseWriter, req *http.Request) error {
+	_, pattern := m.ServeMux.Handler(req)
+	if pattern == "" {
+		return notFound(c, w, req, m.NotFound)
 	}
+
+	ctx := c.Context
+	subctx := context.WithValue(ctx, contextKey{}, c)
+	subreq := req.WithContext(subctx)
+
+	m.ServeMux.ServeHTTP(w, subreq)
+
+	return c.Next(w, req)
+}
+
+func (m *Mux) handle(w http.ResponseWriter, req *http.Request, hs []Handler) {
+	ctx := req.Context()
+	c := ctx.Value(contextKey{}).(*Context)
 
 	c.handlers = hs
-
-	err = c.Next(w, req)
-	if err != nil {
-		return
-	}
 }
 
 func (r *Router) Group(path string, ms ...Middleware) *Router {
@@ -93,8 +99,8 @@ func (r *Router) Handle(pattern string, h Handler, ms ...Middleware) {
 
 	handlers := slices.Concat(r.middlewares, ms, []Handler{h})
 
-	if f := r.m.HandlerHook; f != nil {
-		f(pattern, h, handlers[:len(handlers)-1])
+	if f := r.m.OnHandle; f != nil {
+		f(p, h, handlers[:len(handlers)-1])
 	}
 
 	r.m.ServeMux.HandleFunc(p, func(w http.ResponseWriter, req *http.Request) {
@@ -155,7 +161,11 @@ func splitPattern(p string) (meth, path string) {
 	return meth, path
 }
 
-func notFound(c *Context, w http.ResponseWriter, req *http.Request) error {
+func notFound(c *Context, w http.ResponseWriter, req *http.Request, f Handler) error {
+	if f != nil {
+		return f(c, w, req)
+	}
+
 	http.NotFound(w, req)
 
 	return nil

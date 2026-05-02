@@ -13,14 +13,36 @@ type (
 
 		KV map[any]any
 
+		pre      []Handler
+		route    Handler
 		handlers []Handler
-		index    int
+
+		index int
 	}
 )
 
 func (c *Context) Next(w http.ResponseWriter, req *http.Request) error {
-	for c.index < len(c.handlers) {
+	for c.index < len(c.pre) {
 		index := c.index
+		c.index++
+
+		err := c.pre[index](c, w, req)
+		if err != nil {
+			return err
+		}
+	}
+
+	if c.index == len(c.pre) {
+		c.index++
+
+		err := c.route(c, w, req)
+		if err != nil {
+			return err
+		}
+	}
+
+	for c.index < len(c.pre)+1+len(c.handlers) {
+		index := c.index - len(c.pre) - 1
 		c.index++
 
 		err := c.handlers[index](c, w, req)
