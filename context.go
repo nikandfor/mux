@@ -3,8 +3,10 @@ package mux
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type (
@@ -12,6 +14,8 @@ type (
 		Context context.Context
 
 		KV map[any]any
+
+		Timestamp time.Time
 
 		pre      []Handler
 		route    Handler
@@ -21,7 +25,9 @@ type (
 	}
 )
 
-func (c *Context) Next(w http.ResponseWriter, req *http.Request) error {
+var Break = errors.New("break")
+
+func (c *Context) Next(w http.ResponseWriter, req *http.Request) (err error) {
 	for c.index < len(c.pre) {
 		index := c.index
 		c.index++
@@ -32,20 +38,16 @@ func (c *Context) Next(w http.ResponseWriter, req *http.Request) error {
 		}
 	}
 
-	if c.index == len(c.pre) {
-		c.index++
-
-		err := c.route(c, w, req)
-		if err != nil {
-			return err
-		}
+	err = c.route(c, w, req)
+	if err != nil {
+		return err
 	}
 
-	for c.index < len(c.pre)+1+len(c.handlers) {
-		index := c.index - len(c.pre) - 1
+	for c.index < len(c.pre)+len(c.handlers) {
+		index := c.index
 		c.index++
 
-		err := c.handlers[index](c, w, req)
+		err := c.handlers[index-len(c.pre)](c, w, req)
 		if err != nil {
 			return err
 		}

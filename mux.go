@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
 type (
@@ -49,6 +50,8 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := &Context{
 		Context: ctx,
 
+		Timestamp: time.Now(),
+
 		pre:   m.Middlewares,
 		route: m.route,
 	}
@@ -68,7 +71,7 @@ func (m *Mux) route(c *Context, w http.ResponseWriter, req *http.Request) error 
 
 	m.ServeMux.ServeHTTP(w, subreq)
 
-	return c.Next(w, req)
+	return nil
 }
 
 func (m *Mux) handle(w http.ResponseWriter, req *http.Request, hs []Handler) {
