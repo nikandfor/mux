@@ -62,6 +62,7 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (m *Mux) route(c *Context, w http.ResponseWriter, req *http.Request) error {
 	_, pattern := m.ServeMux.Handler(req)
 	if pattern == "" {
+		c.Break()
 		return notFound(c, w, req, m.NotFound)
 	}
 

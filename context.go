@@ -3,7 +3,6 @@ package mux
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -24,8 +23,6 @@ type (
 		index int
 	}
 )
-
-var Break = errors.New("break")
 
 func (c *Context) Next(w http.ResponseWriter, req *http.Request) (err error) {
 	for c.index < len(c.pre) {
@@ -55,6 +52,8 @@ func (c *Context) Next(w http.ResponseWriter, req *http.Request) (err error) {
 
 	return nil
 }
+
+func (c *Context) Break() { c.index = 1e10 }
 
 func (c *Context) SetKV(k, v any) {
 	if c.KV == nil {
