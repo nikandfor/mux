@@ -35,9 +35,11 @@ func (c *Context) Next(w http.ResponseWriter, req *http.Request) (err error) {
 		}
 	}
 
-	err = c.route(c, w, req)
-	if err != nil {
-		return err
+	if c.index == len(c.pre) {
+		err = c.route(c, w, req)
+		if err != nil {
+			return err
+		}
 	}
 
 	for c.index < len(c.pre)+len(c.handlers) {
