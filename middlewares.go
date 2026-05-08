@@ -25,7 +25,9 @@ func RedirectCode(url string, code int) Handler {
 	}
 }
 
-func Alert(msg string) Middleware {
+func Alert(format string, args ...any) Middleware {
+	msg := fmt.Sprintf(format, args...)
+
 	return func(c *Context, w http.ResponseWriter, req *http.Request) error {
 		w.Header().Add("X-Alert", msg)
 
