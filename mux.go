@@ -48,15 +48,19 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	c := &Context{
-		Context: ctx,
-
+		Context:   ctx,
 		Timestamp: time.Now(),
+
+		Mux: m,
 
 		pre:   m.Middlewares,
 		route: m.route,
 	}
 
-	_ = c.Next(w, req) // error should be handled by middlewares
+	ctx = context.WithValue(ctx, contextKey{}, c)
+	reqctx := req.WithContext(ctx)
+
+	_ = c.Next(w, reqctx) // error should be handled by middlewares
 }
 
 func (m *Mux) route(c *Context, w http.ResponseWriter, req *http.Request) error {
@@ -66,20 +70,9 @@ func (m *Mux) route(c *Context, w http.ResponseWriter, req *http.Request) error 
 		return notFound(c, w, req, m.NotFound)
 	}
 
-	ctx := c.Context
-	subctx := context.WithValue(ctx, contextKey{}, c)
-	subreq := req.WithContext(subctx)
-
-	m.ServeMux.ServeHTTP(w, subreq)
+	m.ServeMux.ServeHTTP(w, req)
 
 	return nil
-}
-
-func (m *Mux) handle(w http.ResponseWriter, req *http.Request, hs []Handler) {
-	ctx := req.Context()
-	c := ctx.Value(contextKey{}).(*Context)
-
-	c.handlers = hs
 }
 
 func (r *Router) Group(path string, ms ...Middleware) *Router {
@@ -108,8 +101,25 @@ func (r *Router) Handle(pattern string, h Handler, ms ...Middleware) {
 	}
 
 	r.m.ServeMux.HandleFunc(p, func(w http.ResponseWriter, req *http.Request) {
-		r.m.handle(w, req, handlers)
+		ctx := req.Context()
+		c := ContextFrom(ctx)
+
+		c.handlers = handlers
 	})
+}
+
+func WrapStdHandler(h http.Handler) Handler {
+	return func(c *Context, w http.ResponseWriter, req *http.Request) error {
+		h.ServeHTTP(w, req)
+		return nil
+	}
+}
+
+func WrapStdHandlerFunc(f http.HandlerFunc) Handler {
+	return func(c *Context, w http.ResponseWriter, req *http.Request) error {
+		f(w, req)
+		return nil
+	}
 }
 
 func Join(elems ...string) string {

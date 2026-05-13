@@ -16,6 +16,8 @@ type (
 
 		Timestamp time.Time
 
+		Mux *Mux
+
 		pre      []Handler
 		route    Handler
 		handlers []Handler
@@ -23,6 +25,13 @@ type (
 		index int
 	}
 )
+
+func ContextFrom(ctx context.Context) *Context {
+	v := ctx.Value(contextKey{})
+	c, _ := v.(*Context)
+
+	return c
+}
 
 func (c *Context) Next(w http.ResponseWriter, req *http.Request) (err error) {
 	for c.index < len(c.pre) {
