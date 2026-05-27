@@ -3,6 +3,7 @@ package mux
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -42,6 +43,15 @@ func New() *Mux {
 	m.Router.m = m
 
 	return m
+}
+
+func (m *Mux) Serve(ctx context.Context, l net.Listener) error {
+	srv := http.Server{
+		Handler:     m,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
+
+	return srv.Serve(l)
 }
 
 func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {

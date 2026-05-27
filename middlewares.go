@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func Ok(c *Context, w http.ResponseWriter, req *http.Request) error {
+func OK(c *Context, w http.ResponseWriter, req *http.Request) error {
 	w.WriteHeader(http.StatusOK)
 	return nil
 }
