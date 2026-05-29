@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,8 +18,17 @@ func Redirect(url string) Handler {
 }
 
 func RedirectCode(url string, code int) Handler {
+	absolute := strings.HasPrefix(url, "/")
+
 	return func(c *Context, w http.ResponseWriter, req *http.Request) error {
-		w.Header().Set("Location", url)
+		loc := url
+
+		if absolute {
+			prefix := req.Header.Get("X-Forwarded-Prefix")
+			loc = Join(prefix, loc)
+		}
+
+		w.Header().Set("Location", loc)
 		w.WriteHeader(code)
 
 		return nil
